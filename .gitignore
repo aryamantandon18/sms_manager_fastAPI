@@ -1,0 +1,7 @@
+# Node.js
+./frontend/node_modules/
+
+# Python
+./fastAPI/__pycache__/
+./fastAPI/venv/
+*.pyc

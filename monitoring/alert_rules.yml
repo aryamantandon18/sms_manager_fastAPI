@@ -1,0 +1,20 @@
+groups:
+- name: sms_alerts
+  rules:
+  - alert: LowSMSSuccessRate
+    expr: (sms_success / sms_sent) * 100 < 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Low SMS success rate for {{ $labels.country }} - {{ $labels.operator }}"
+      description: "SMS success rate is below 80% for the last 5 minutes"
+
+  - alert: ProgramCrashed
+    expr: up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "SMS program crashed for {{ $labels.country }} - {{ $labels.operator }}"
+      description: "The SMS program has been down for more than 1 minute"
