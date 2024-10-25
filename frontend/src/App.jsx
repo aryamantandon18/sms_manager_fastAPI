@@ -41,15 +41,7 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      // Create a URLSearchParams object to convert loginForm to x-www-form-urlencoded format
-      const params = new URLSearchParams();
-      for (const [key, value] of Object.entries(loginForm)) {
-        params.append(key, value);
-      }
-      const response = await axios.post(`${API_URL}/token`, params, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded', // Set the Content-Type
-        },
+      const response = await axios.post(`${API_URL}/token`,loginForm, {
         withCredentials: true,
       });
       setUser(response.data);

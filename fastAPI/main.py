@@ -1,9 +1,9 @@
+import os
 from fastapi import FastAPI, Depends, HTTPException, status, Response, Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from typing import List, Optional
 import subprocess
-import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 import mysql.connector
 from jose import JWTError, jwt
@@ -11,24 +11,28 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
-
+from dotenv import load_dotenv
 
 app = FastAPI()
 
-# Database connections
-mongo_client = AsyncIOMotorClient("mongodb://localhost:27017")
-mongo_db = mongo_client["sms_config"]
+load_dotenv()
 
+# MongoDB connection
+mongo_client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+mongo_db = mongo_client[os.getenv("MONGO_DB")]
+
+# MySQL connection
 mysql_connection = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="aryaman123",
-    database="sms_metrics"
+    host=os.getenv("MYSQL_HOST"),
+    user=os.getenv("MYSQL_USER"),
+    password=os.getenv("MYSQL_PASSWORD"),
+    database=os.getenv("MYSQL_DATABASE")
 )
 
-origins = [
-    "http://localhost:5173"
-]
+frontend_uri = os.getenv("FRONTEND_URI")
+print(f"Frontend URI is : {frontend_uri}")
+origins = ["http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins = origins,
@@ -36,6 +40,7 @@ app.add_middleware(
     allow_methods = ['GET','POST','PUT','DELETE'],
     allow_headers = ["*"]
 )
+
 # JWT settings
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
@@ -48,14 +53,13 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Models
 class User(BaseModel):
-    username: str
     email: str
-    full_name: Optional[str] = None
+    username: str = None
     disabled: Optional[bool] = None
     password: Optional[str] = None  
 
 class UserInDB(User):
-    hashed_password: str  # Typically you would store the hashed version
+    hashed_password: str
 
     class Config:
         orm_mode = True
@@ -66,7 +70,7 @@ class Token(BaseModel):
     token_type: str
 
 class TokenData(BaseModel):
-    username: Optional[str] = None
+    email: Optional[str] = None
 
 class CountryOperator(BaseModel):
     country: str
@@ -80,23 +84,26 @@ class SMSMetrics(BaseModel):
     success: int
     failure: int
 
+class LoginData(BaseModel):
+    email: str
+    password: str
+
 # Utility Functions
 async def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
-async def get_user(username: str):
-    user = await mongo_db.users.find_one({"username": username})
+async def get_user(email: str):
+    user = await mongo_db.users.find_one({"email": email})
     if user:
         return {
             "id": str(user["_id"]),
-            "username": user["username"],
-            "email":user["email"],
+            "email": user["email"],
             "hashed_password": user["hashed_password"],
         }
     return None
 
-async def authenticate_user(username: str, password: str):
-    user = await get_user(username)
+async def authenticate_user(email: str, password: str):
+    user = await get_user(email)
     if not user or not await verify_password(password, user["hashed_password"]):
         return False
     return UserInDB(**user) 
@@ -120,14 +127,14 @@ async def get_current_user(request: Request):
     
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        email: str = payload.get("sub")
+        if email is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
+        token_data = TokenData(email=email)
     except JWTError:
         raise credentials_exception
 
-    user = await get_user(token_data.username)
+    user = await get_user(token_data.email)
     if user is None:
         raise credentials_exception
     return UserInDB(**user)
@@ -137,11 +144,15 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
+@app.get("/")
+def working_fine():
+    return{"Status":"API is working"}
+
 # Signup API
 @app.post("/signup")
 async def signup(user: User):
-    if await get_user(user.username):
-        raise HTTPException(status_code=400, detail="Username already registered")
+    if await get_user(user.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_password = pwd_context.hash(user.password)
     user_data = user.dict(exclude={"password"})
@@ -149,12 +160,11 @@ async def signup(user: User):
     await mongo_db.users.insert_one(user_data)
     return {"message": "User created successfully"}
 
+# singout api
 @app.post("/signout")
-async def signout(res:Response,current_user: User = Depends(get_current_active_user)):
-    # Delete the user from the database
-    result = await mongo_db.users.delete_one({"username": current_user.username})
+async def signout(res:Response, current_user: User = Depends(get_current_active_user)):
+    result = await mongo_db.users.delete_one({"email": current_user.email})
     if result.deleted_count == 1:
-        # Invalidate token on the client side by removing it from cookies
         res.delete_cookie(key="access_token")
         return {"msg": "Successfully signed out and user deleted from the database."}
     else:
@@ -162,19 +172,18 @@ async def signout(res:Response,current_user: User = Depends(get_current_active_u
 
 # Login API (using cookies for token)
 @app.post("/token", response_model=Token)
-async def login_for_access_token(res: Response, form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await authenticate_user(form_data.username, form_data.password)
+async def login_for_access_token(res: Response, login_data: LoginData):
+    user = await authenticate_user(login_data.email, login_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
 
-    # Set the JWT token in an HTTP-only cookie
     res.set_cookie(
         key="access_token", 
         value=access_token, 
@@ -196,7 +205,6 @@ async def logout(res: Response, current_user: User = Depends(get_current_active_
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     return current_user
 
-# The below FastAPI endpoint definition for start_session is responsible for initiating a new background session using the screen command in a Unix-like operating system.
 # Process Management
 @app.post("/start_session/{country}/{operator}")
 async def start_session(country: str, operator: str, current_user: User = Depends(get_current_active_user)):
@@ -231,7 +239,7 @@ async def get_country_operators(current_user: User = Depends(get_current_active_
     country_operators_cursor = await mongo_db.country_operators.find().to_list(length=100)
     country_operators = [
         {
-            "id": str(operator["_id"]),  # Convert ObjectId to string
+            "id": str(operator["_id"]),
             "country": operator["country"],
             "operator": operator["operator"],
             "is_high_priority": operator["is_high_priority"]
@@ -256,17 +264,7 @@ async def delete_country_operator(operator_id: str, current_user: User = Depends
         return {"message": "Country-Operator pair deleted successfully"}
     return {"message": "Country-Operator pair not found"}
 
-
 # Main application
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-# Starting a Background Process:
-
-# subprocess.run(...) is used to execute a shell command:
-# screen: A terminal multiplexer that allows you to run multiple terminal sessions in a single window or detach them and reattach later.
-# -dmS: This option tells screen to start a new session (-d) in detached mode (-m) and give it a name (-S) specified by session_name.
-# python: This indicates that a Python script is to be run.
-# sms_program_{country}_{operator}.py: This is the name of the Python script that will be executed. It is dynamically created based on the country and operator parameters.
