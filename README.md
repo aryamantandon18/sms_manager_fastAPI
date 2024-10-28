@@ -6,7 +6,7 @@ Technologies Used
 •	Database: MongoDB, mySQL 
 •	API Documentation: FastAPI interactive docs (Swagger UI) 
  
- 
+
 Features 
 •	User Authentication: 
 •	Login & Signup: Users can log in or create an account with a username, email, and password. 
