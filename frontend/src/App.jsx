@@ -12,8 +12,8 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [metrics, setMetrics] = useState([])
   const [countryOperators, setCountryOperators] = useState([])
-  const [loginForm, setLoginForm] = useState({ username: '', email:'', password: '' })
-  const [signupForm, setSignupForm] = useState({ username: '', email: '', password: '' })
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const [signupForm, setSignupForm] = useState({ email: '', password: '' })
   const [newCountryOperator, setNewCountryOperator] = useState({ country: '', operator: '', is_high_priority: false })
   const [activeTab, setActiveTab] = useState('login')
   const [editingCountryOperator, setEditingCountryOperator] = useState(null)
@@ -22,12 +22,12 @@ export default function App() {
     checkAuth()
   }, [])
 
-  useEffect(()=>{
+  useEffect(() => {
     if (user) {
       fetchMetrics()
       fetchCountryOperators()
     }
-  },[user])
+  }, [user])
 
   const checkAuth = async () => {
     try {
@@ -39,16 +39,17 @@ export default function App() {
   }
 
   const handleLogin = async (e) => {
-    e.preventDefault();
+    e.preventDefault()
     try {
-      const response = await axios.post(`${API_URL}/token`,loginForm, {
+      const response = await axios.post(`${API_URL}/token`, loginForm, {
         withCredentials: true,
-      });
-      setUser(response.data);
+      })
+      setUser(response.data)
+      checkAuth() // Fetch user details after successful login
     } catch (error) {
-      console.error('Login failed', error);
+      console.error('Login failed', error)
     }
-  };
+  }
 
   const handleSignup = async (e) => {
     e.preventDefault()
@@ -73,9 +74,10 @@ export default function App() {
   const fetchMetrics = async () => {
     try {
       const response = await axios.get(`${API_URL}/metrics/all`, { withCredentials: true })
-      setMetrics(response.data)
+      setMetrics(Array.isArray(response.data) ? response.data : [])
     } catch (error) {
       console.error('Failed to fetch metrics', error)
+      setMetrics([])
     }
   }
 
@@ -106,7 +108,7 @@ export default function App() {
       fetchCountryOperators()
       setEditingCountryOperator(null)
     } catch (error) {
-      console.error('Failed to update country operator', error) 
+      console.error('Failed to update country operator', error)
     }
   }
 
@@ -161,27 +163,15 @@ export default function App() {
           {activeTab === 'login' ? (
             <form onSubmit={handleLogin}>
               <div className="mb-4">
-                <label htmlFor="login-username" className="block text-sm font-medium text-gray-700">Username</label>
+                <label htmlFor="login-email" className="block text-sm font-medium text-gray-700">Email</label>
                 <input
-                  id="login-username"
-                  type="text"
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                  value={loginForm.username}
-                  onChange={e => setLoginForm({...loginForm, username: e.target.value})}
-                />
-              </div>
-              
-              <div>
-              <label htmlFor="login-username" className="block text-sm font-medium text-gray-700">Email</label>
-                <input
-                  id="login-username"
-                  type="text"
+                  id="login-email"
+                  type="email"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                   value={loginForm.email}
                   onChange={e => setLoginForm({...loginForm, email: e.target.value})}
                 />
               </div>
-
               <div className="mb-4">
                 <label htmlFor="login-password" className="block text-sm font-medium text-gray-700">Password</label>
                 <input
@@ -198,16 +188,6 @@ export default function App() {
             </form>
           ) : (
             <form onSubmit={handleSignup}>
-              <div className="mb-4">
-                <label htmlFor="signup-username" className="block text-sm font-medium text-gray-700">Username</label>
-                <input
-                  id="signup-username"
-                  type="text"
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                  value={signupForm.username}
-                  onChange={e => setSignupForm({...signupForm, username: e.target.value})}
-                />
-              </div>
               <div className="mb-4">
                 <label htmlFor="signup-email" className="block text-sm font-medium text-gray-700">Email</label>
                 <input
@@ -246,7 +226,7 @@ export default function App() {
         transition={{ duration: 0.5 }}
         className="bg-white p-6 rounded-lg shadow-md mb-8"
       >
-        <h2 className="text-2xl font-bold mb-2">Welcome, {user.username}!</h2>
+        <h2 className="text-2xl font-bold mb-2">Welcome, {user.email}!</h2>
         <p className="text-gray-600 mb-4">SMS Dashboard</p>
         <button
           onClick={handleLogout}
@@ -352,12 +332,13 @@ export default function App() {
                     </button>
                   </td>
                 </tr>
+              
               ))}
             </tbody>
           </table>
         </div>
         {editingCountryOperator ? (
-          <form  onSubmit={handleUpdateCountryOperator} className="mt-6">
+          <form onSubmit={handleUpdateCountryOperator} className="mt-6">
             <h4 className="text-lg font-semibold mb-2">Edit Country-Operator</h4>
             <div className="flex space-x-2">
               <input

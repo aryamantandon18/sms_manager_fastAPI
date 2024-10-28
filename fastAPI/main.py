@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
 from dotenv import load_dotenv
+from prometheus_client import make_asgi_app, Counter, Gauge
 
 app = FastAPI()
 
@@ -40,6 +41,26 @@ app.add_middleware(
     allow_methods = ['GET','POST','PUT','DELETE'],
     allow_headers = ["*"]
 )
+
+
+# Prometheus metrics
+REQUESTS = Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'status'])
+ACTIVE_USERS = Gauge('active_users', 'Number of active users')
+SMS_SENT = Counter('sms_sent_total', 'Total SMS sent', ['country', 'operator'])
+SMS_SUCCESS = Counter('sms_success_total', 'Total successful SMS', ['country', 'operator'])
+SMS_FAILURE = Counter('sms_failure_total', 'Total failed SMS', ['country', 'operator'])
+
+# Add Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+# Middleware to count requests
+@app.middleware("http")
+async def count_requests(request: Request, call_next):
+    response = await call_next(request)
+    REQUESTS.labels(method=request.method, endpoint=request.url.path, status=response.status_code).inc()
+    return response
+
 
 # JWT settings
 SECRET_KEY = "your-secret-key"
@@ -210,6 +231,9 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
 async def start_session(country: str, operator: str, current_user: User = Depends(get_current_active_user)):
     session_name = f"program_{country}_{operator}"
     subprocess.run(["screen", "-dmS", session_name, "python", f"sms_program_{country}_{operator}.py"])
+    SMS_SENT.labels(country=country, operator=operator).inc(0)  # Initialize the counter
+    SMS_SUCCESS.labels(country=country, operator=operator).inc(0)
+    SMS_FAILURE.labels(country=country, operator=operator).inc(0)
     return {"message": f"Started session for {country} - {operator}"}
 
 @app.post("/stop_session/{country}/{operator}")
@@ -217,6 +241,15 @@ async def stop_session(country: str, operator: str, current_user: User = Depends
     session_name = f"program_{country}_{operator}"
     subprocess.run(["screen", "-S", session_name, "-X", "quit"])
     return {"message": f"Stopped session for {country} - {operator}"}
+
+# Update this function to increment Prometheus counters
+@app.post("/update_metrics")
+async def update_metrics(metrics: SMSMetrics, current_user: User = Depends(get_current_active_user)):
+    SMS_SENT.labels(country=metrics.country, operator=metrics.operator).inc(metrics.sent)
+    SMS_SUCCESS.labels(country=metrics.country, operator=metrics.operator).inc(metrics.success)
+    SMS_FAILURE.labels(country=metrics.country, operator=metrics.operator).inc(metrics.failure)
+    return {"message": "Metrics updated successfully"}
+
 
 # Real-Time Metrics
 @app.get("/metrics/{country}")
